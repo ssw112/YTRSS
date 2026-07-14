@@ -29,8 +29,8 @@ def download_subtitles(video_id):
     """Downloads auto-generated English or Ukrainian/Russian subtitles using yt-dlp."""
     output_tpl = f"/tmp/yt_feed_{video_id}"
     
-    langs = ["en", "uk", "ru"]
-    srt_path = None
+    # Prioritize original/native tracks first, then fallback to standard codes.
+    langs = ["uk-orig", "uk", "ru-orig", "ru", "en-orig", "en", "es-orig", "es"]
     
     # Try getting yt-dlp binary from environment or default to system PATH
     ytdlp_bin = os.environ.get("YT_DLP_PATH", "yt-dlp")
@@ -82,8 +82,8 @@ Based on your Stage 1 characterization, dynamically adapt your HTML output struc
 
 [COGNITIVE STAGE 3: GENERAL FORMATTING CONSTRAINTS]
 - LANGUAGE RULES: 
-  * If the transcript is in Ukrainian (uk), Russian (ru), Spanish (es), or English (en), write the article in that native language.
-  * For ANY other language (such as Italian, French, German, Japanese, etc.), automatically translate and write the final article in English (en).
+  * Under all circumstances, write the final summary article in the ORIGINAL language of the transcript/video (e.g., if the transcript is in Ukrainian (uk), write the article in Ukrainian; if it is in Spanish (es), write it in Spanish; if it is in English (en), write it in English; if it is in Russian (ru), write it in Russian).
+  * For ANY other language (such as Italian, French, German, Japanese, etc.), automatically translate and write the final article in English (en). Do NOT translate Ukrainian, Russian, Spanish, or English into other languages.
 - Output ONLY clean, semantic HTML (enclosed in a parent <div>, using <h2>, <h3>, <h4>, <p>, <strong>, <ul>, <ol>, <li>, <blockquote>, <pre><code> for snippets).
 - Do NOT output any markdown, ```html wrappers, or outer html/body tags.
 - Include a small, subtle 2-line "Meta-Context" block at the very top using <em> detailing the detected video archetype, estimated speaker count, and tone. Include a clickable link to the video at the very top: '<p><a href="https://www.youtube.com/watch?v={video_id}" target="_blank">🎥 Watch original video on YouTube</a></p>'.
@@ -167,16 +167,17 @@ def process_youtube_video(url):
         return False
         
     # 4. Append to RSS feed
-    # By using a custom article link prefix instead of the direct YouTube URL,
-    # Feedly and other RSS clients will render the article text inline instead of
-    # auto-redirecting to the YouTube app.
-    article_link_prefix = os.environ.get("ARTICLE_LINK_PREFIX", "http://localhost:8090/article/")
+    # 4. Append to RSS feed
+    # By using a dummy local link instead of the direct YouTube URL,
+    # Feedly will render the article text inline instead of treating
+    # the entire entry as a YouTube video bookmark.
+    # Secure WAN public link proxied via Caddy SSL so you can read articles outside your LAN!
     add_article_to_feed(
         title=f"AI Article: {video_title}",
-        link=f"{article_link_prefix}{video_id}",
+        link=f"https://dataval.tplinkdns.com:8443/article/{video_id}",
         html_content=article_html
     )
-    print("Done! Check your feed now.")
+    print("Done! Check your Feedly feed now.")
     return True
 
 if __name__ == "__main__":
