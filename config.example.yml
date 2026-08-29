@@ -1,0 +1,37 @@
+# ytfeed configuration. Copy to config.yml (or edit via /setup page).
+# Secrets: use ${ENV_VAR} placeholders; set the vars in .env.
+
+data_dir: /data
+
+playlist:
+  url: "https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID"
+  poll_interval_seconds: 3600
+
+llm:
+  prompt_path: /app/prompts/summarize.md
+  providers:
+    - label: "Nara/mistral-large"
+      model: "mistral-large"
+      api_base: "https://router.bynara.id/v1"
+      api_key: "${NARA_API_KEY}"
+    - label: "Nara/agnes-2.5-flash"
+      model: "agnes-2.5-flash"
+      api_base: "https://router.bynara.id/v1"
+      api_key: "${NARA_API_KEY}"
+    - label: "Nara/deepseek-v4-flash"
+      model: "deepseek-v4-flash"
+      api_base: "https://router.bynara.id/v1"
+      api_key: "${NARA_API_KEY}"
+    - label: "TokenRouter/kimi-k3-free"
+      model: "moonshotai/kimi-k3-free"
+      api_base: "https://api.tokenrouter.com/v1"
+      api_key: "${TOKENROUTER_API_KEY}"
+
+feed:
+  title: "My YouTube Read-Later Feed"
+  description: "AI summaries of YouTube videos."
+  public_base_url: "https://your.domain.example"   # what Feedly and article links see
+  max_items: 20
+
+server:
+  port: 8091

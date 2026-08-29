@@ -1,0 +1,10 @@
+services:
+  ytfeed:
+    build: .
+    container_name: ytfeed
+    restart: unless-stopped
+    ports:
+      - "8091:8091"
+    env_file: .env
+    volumes:
+      - ./data:/data
