@@ -21,6 +21,7 @@ class State:
             "last_article": None,
             "runs": 0,
             "providers": {},           # label -> {last_ok, last_error, error_msg}
+            "sources": {},             # name -> {last_run_at, last_run_result, last_success_at, last_article}
         }
         self._load()
 
@@ -34,7 +35,7 @@ class State:
                 with open(self.path) as f:
                     saved = json.load(f)
                 # keep persistent fields, refresh started_at
-                for k in ("last_success_at", "last_article", "providers"):
+                for k in ("last_success_at", "last_article", "providers", "sources"):
                     if k in saved:
                         self.data[k] = saved[k]
             except Exception:
@@ -48,17 +49,23 @@ class State:
         except Exception:
             pass
 
-    def run_finished(self, result):
+    def run_finished(self, result, source="main"):
         with self._lock:
             self.data["last_run_at"] = self._now()
             self.data["last_run_result"] = result
             self.data["runs"] += 1
+            s = self.data.setdefault("sources", {}).setdefault(source, {})
+            s["last_run_at"] = self._now()
+            s["last_run_result"] = result
             self._save()
 
-    def article_published(self, title):
+    def article_published(self, title, source="main"):
         with self._lock:
             self.data["last_success_at"] = self._now()
             self.data["last_article"] = title
+            s = self.data.setdefault("sources", {}).setdefault(source, {})
+            s["last_success_at"] = self._now()
+            s["last_article"] = title
             self._save()
 
     def provider_ok(self, label):

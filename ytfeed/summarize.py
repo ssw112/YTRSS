@@ -1,6 +1,7 @@
 """LLM article generation with provider fallback chain + language verification."""
 import os
 import litellm
+import openai
 
 from .transcript import LANG_NAMES
 
@@ -8,6 +9,21 @@ try:
     from langdetect import detect as _langdetect
 except ImportError:  # optional dependency; verification is skipped without it
     _langdetect = None
+
+# One OpenAI client per (api_base, api_key). Without client= LiteLLM builds a
+# client per call config and drops it unclosed, leaking sockets (CLOSE_WAIT).
+_CLIENTS = {}
+CLIENT_TIMEOUT = 600
+
+
+def _client(provider):
+    key = (provider["api_base"], provider["api_key"])
+    if key not in _CLIENTS:
+        _CLIENTS[key] = openai.OpenAI(base_url=provider["api_base"],
+                                      api_key=provider["api_key"],
+                                      timeout=CLIENT_TIMEOUT)
+    return _CLIENTS[key]
+
 
 # Languages kept in the original; everything else is translated to English.
 KEEP_LANGS = {"uk", "ru", "en", "es"}
@@ -49,13 +65,14 @@ def load_prompt_template(prompt_path):
         return f.read()
 
 
-def generate_article(cfg, title, transcript, video_id, lang_code, log, state=None):
+def generate_article(cfg, title, transcript, video_id, lang_code, log, state=None,
+                     prompt_path=None):
     """Runs the provider chain. Returns HTML or None (transient failure).
 
     Never publishes a wrong-language article: on a language-check failure the
     same provider gets one forceful retry, then the next provider is tried.
     """
-    prompt_path = cfg["llm"].get("prompt_path", "prompts/summarize.md")
+    prompt_path = prompt_path or cfg["llm"].get("prompt_path", "prompts/summarize.md")
     template = load_prompt_template(prompt_path)
     language_rule, expected_lang = _language_rule(lang_code)
     prompt = template.format(title=title, video_id=video_id,
@@ -76,6 +93,7 @@ def generate_article(cfg, title, transcript, video_id, lang_code, log, state=Non
                     api_base=provider["api_base"],
                     api_key=provider["api_key"],
                     custom_llm_provider="openai",
+                    client=_client(provider),
                     messages=messages,
                     temperature=0.2,
                 )
@@ -119,6 +137,7 @@ def test_provider(provider):
             api_base=provider["api_base"],
             api_key=provider["api_key"],
             custom_llm_provider="openai",
+            client=_client(provider),
             messages=[{"role": "user", "content": "Reply with exactly: OK"}],
             max_tokens=10,
         )

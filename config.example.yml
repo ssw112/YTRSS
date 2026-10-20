@@ -1,37 +1,53 @@
-# ytfeed configuration. Copy to config.yml (or edit via /setup page).
+# ytfeed configuration. Copy to data/config.yml (or edit via the /setup page).
 # Secrets: use ${ENV_VAR} placeholders; set the vars in .env.
 
 data_dir: /data
 
+# Main playlist. Always the implicit source "main":
+#   feed.xml, processed_videos.json, articles/, route /article/{id}
 playlist:
   url: "https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID"
   poll_interval_seconds: 3600
 
 llm:
-  prompt_path: /app/prompts/summarize.md
+  prompt_path: /app/prompts/summarize.md      # prompt for the main source
+  # Ordered fallback chain. Any OpenAI-compatible endpoint works: a local
+  # gateway such as LiteLLM, or a provider directly.
   providers:
-    - label: "Nara/mistral-large"
-      model: "mistral-large"
-      api_base: "https://router.bynara.id/v1"
-      api_key: "${NARA_API_KEY}"
-    - label: "Nara/agnes-2.5-flash"
-      model: "agnes-2.5-flash"
-      api_base: "https://router.bynara.id/v1"
-      api_key: "${NARA_API_KEY}"
-    - label: "Nara/deepseek-v4-flash"
-      model: "deepseek-v4-flash"
-      api_base: "https://router.bynara.id/v1"
-      api_key: "${NARA_API_KEY}"
-    - label: "TokenRouter/kimi-k3-free"
-      model: "moonshotai/kimi-k3-free"
-      api_base: "https://api.tokenrouter.com/v1"
-      api_key: "${TOKENROUTER_API_KEY}"
+    - label: "Gateway/summarizer"
+      model: "your-model-alias"               # model name the endpoint knows
+      api_base: "http://host.docker.internal:4000/v1"   # host gateway, seen from the container
+      api_key: "${LLM_API_KEY}"
+    # Direct provider as a second entry (used if the first one fails):
+    # - label: "Provider/some-model"
+    #   model: "some-model"
+    #   api_base: "https://api.provider.example/v1"
+    #   api_key: "${PROVIDER_API_KEY}"
 
 feed:
   title: "My YouTube Read-Later Feed"
   description: "AI summaries of YouTube videos."
-  public_base_url: "https://your.domain.example"   # what Feedly and article links see
-  max_items: 20
+  public_base_url: "https://your.domain.example"   # what the reader and article links see
+  max_items: 100                                   # feed cap; the article archive is never trimmed
 
 server:
   port: 8091
+
+# Extra playlists, each with its own feed. Optional.
+# Only name and url are required. Everything else is derived from the name:
+#   feed_file        <name>.xml
+#   ledger_file      processed_<name>.json
+#   archive_subdir   <name>            (articles/<name>/)
+#   route            <name>            (article links: /<name>/{video_id})
+#   prompt_path      /app/prompts/<name>.md
+#   max_items        feed.max_items
+#   poll_interval_seconds  600
+# "main", "article" and "feed" are reserved names.
+sources:
+  - name: tldr
+    url: "https://www.youtube.com/playlist?list=YOUR_SECOND_PLAYLIST_ID"
+    poll_interval_seconds: 600          # override of the default
+    prompt_path: /app/prompts/tldr.md   # shipped in prompts/
+    feed_title: "TLDR"
+    feed_description: "Short TLDR of saved YouTube videos."
+    max_items: 200

@@ -13,17 +13,44 @@ import tempfile
 
 YT_DLP = "yt-dlp"
 
+
+class PermanentFailure(Exception):
+    """Raised when a video can never be summarized (private/removed/etc)."""
+
 LANG_NAMES = {"uk": "Ukrainian", "ru": "Russian", "en": "English", "es": "Spanish",
               "de": "German", "fr": "French", "it": "Italian", "pl": "Polish",
               "pt": "Portuguese", "ja": "Japanese", "ko": "Korean", "zh": "Chinese"}
+
+
+PERMANENT_MARKERS = (
+    "private video",
+    "video unavailable",
+    "has been removed",
+    "this video is not available",
+    "video is unavailable",
+    "account associated with this video has been terminated",
+    "no longer available",
+)
 
 
 def video_metadata(video_id):
     """--dump-json goes to stdout only; nothing is written to disk."""
     cmd = [YT_DLP, "--dump-json", "--skip-download",
            f"https://www.youtube.com/watch?v={video_id}"]
-    out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL, timeout=120)
-    return json.loads(out)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if proc.returncode != 0:
+        stderr_lower = (proc.stderr or "").lower()
+        if "private video" in stderr_lower:
+            raise PermanentFailure("Video is private.")
+        if "video unavailable" in stderr_lower or "this video is not available" in stderr_lower \
+                or "video is unavailable" in stderr_lower:
+            raise PermanentFailure("Video is unavailable.")
+        if "has been removed" in stderr_lower or "no longer available" in stderr_lower:
+            raise PermanentFailure("Video has been removed.")
+        if "account associated with this video has been terminated" in stderr_lower:
+            raise PermanentFailure("The account associated with this video has been terminated.")
+        raise RuntimeError((proc.stderr or "")[:300])
+    return json.loads(proc.stdout)
 
 
 def detect_original_language(meta):
@@ -34,6 +61,13 @@ def detect_original_language(meta):
 
     orig_tracks = [k for k in autos if k.endswith("-orig")]
     if orig_tracks:
+        # Auto-dubbed videos expose several -orig tracks (e.g. en-US-orig for the
+        # dub + uk-orig for the real audio). Prefer the one matching the video's
+        # declared language; never blindly take the first.
+        if orig_lang:
+            for k in orig_tracks:
+                if k[:-5] == orig_lang or k[:-5].split("-")[0] == orig_lang.split("-")[0]:
+                    return k, orig_lang
         track = orig_tracks[0]
         return track, track[:-5]
     if orig_lang and (orig_lang in subs or orig_lang in autos):
@@ -49,7 +83,9 @@ def download_transcript(video_id, log):
 
     if track:
         log.info("Detected original language: %s (track %s)", lang_code, track)
-        candidates = [track] + ([track[:-5]] if track.endswith("-orig") else [])
+        autos = meta.get("automatic_captions") or {}
+        others = [k for k in autos if k.endswith("-orig") and k != track]
+        candidates = [track] + ([track[:-5]] if track.endswith("-orig") else []) + others
     else:
         log.warning("No -orig track / declared language; legacy fallback list.")
         candidates = ["uk-orig", "ru-orig", "en-orig", "es-orig", "en", "uk", "ru", "es"]
@@ -60,8 +96,13 @@ def download_transcript(video_id, log):
             cmd = [YT_DLP, "--write-auto-subs", "--sub-lang", lang,
                    "--skip-download", "--convert-subs", "srt", "-o", tpl,
                    f"https://www.youtube.com/watch?v={video_id}"]
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             srt = f"{tpl}.{lang}.srt"
+            if not os.path.exists(srt) and proc.returncode != 0:
+                # yt-dlp itself failed (network/throttle/HTTP error): TRANSIENT.
+                # Never turn this into a "no captions" stub; retry next cycle.
+                err = (proc.stderr or "").strip().splitlines()
+                raise RuntimeError(f"subtitle download failed for {lang}: {err[-1][:200] if err else 'unknown'}")
             if os.path.exists(srt):
                 log.info("Downloaded %s subtitles.", lang)
                 if lang_code is None:

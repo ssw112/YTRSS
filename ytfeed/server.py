@@ -11,6 +11,7 @@ import secrets
 import urllib.parse
 
 from . import feed as feed_mod
+from .config import sources
 from .summarize import test_provider
 
 ARTICLE_CSS = """
@@ -61,6 +62,14 @@ def make_handler(app):
             if path.startswith("/article/"):
                 return self._serve_article(path.rsplit("/", 1)[-1])
 
+            # Extra sources: /{name}.xml and /{route}/{id}
+            if app.cfg is not None:
+                for src in sources(app.cfg)[1:]:
+                    if path == f"/{src['feed_file']}":
+                        return self._serve_feed(src)
+                    if path.startswith(f"/{src['route']}/"):
+                        return self._serve_article(path.rsplit("/", 1)[-1], src)
+
             if path == "/status":
                 return self._serve_status()
 
@@ -88,19 +97,19 @@ def make_handler(app):
             self._send(404, "not found", "text/plain")
 
         # ------------------------------------------------------------------
-        def _serve_feed(self):
+        def _serve_feed(self, src=None):
             if app.cfg is None:
                 return self._send(503, "not configured yet", "text/plain")
-            path = feed_mod._feed_path(app.cfg)
+            path = feed_mod._feed_path(app.cfg, src)
             if not os.path.exists(path):
                 return self._send(404, "feed not generated yet", "text/plain")
             with open(path, "rb") as f:
                 self._send(200, f.read(), "application/xml; charset=utf-8")
 
-        def _serve_article(self, video_id):
+        def _serve_article(self, video_id, src=None):
             if app.cfg is None:
                 return self._send(503, "not configured yet", "text/plain")
-            title, content = feed_mod.get_article(app.cfg, video_id)
+            title, content = feed_mod.get_article(app.cfg, video_id, src)
             if not content:
                 self.send_response(302)
                 self.send_header("Location",
@@ -122,6 +131,16 @@ def make_handler(app):
                          f"<td>{p.get('last_ok', '—')}</td>"
                          f"<td>{p.get('last_error', '—')}</td>"
                          f"<td>{html_mod.escape(str(p.get('error_msg', ''))[:120])}</td></tr>")
+            base = (app.cfg or {}).get('feed', {}).get('public_base_url', '').rstrip('/')
+            src_rows = ""
+            for src in (sources(app.cfg) if app.cfg else []):
+                st = snap.get("sources", {}).get(src["name"], {})
+                src_rows += (f"<tr><td>{html_mod.escape(src['name'])}</td>"
+                             f"<td>{base}/{src['feed_file']}</td>"
+                             f"<td>{st.get('last_run_at', '—')}</td>"
+                             f"<td>{html_mod.escape(str(st.get('last_run_result', '—')))}</td>"
+                             f"<td>{st.get('last_success_at', '—')} — "
+                             f"{html_mod.escape(str(st.get('last_article', '—')))}</td></tr>")
             body = f"""<!DOCTYPE html><html><head><meta charset='utf-8'>
 <title>ytfeed status</title><style>{ARTICLE_CSS}</style></head><body>
 <h1>ytfeed status</h1>
@@ -134,6 +153,8 @@ def make_handler(app):
 <li>Runs since start: {snap.get('runs', 0)}</li>
 <li>Last article published: {snap.get('last_success_at', '—')} — {html_mod.escape(str(snap.get('last_article', '—')))}</li>
 </ul>
+<h2>Sources</h2>
+<table><tr><th>source</th><th>feed</th><th>last run</th><th>result</th><th>last article</th></tr>{src_rows}</table>
 <h2>Providers</h2>
 <table><tr><th>provider</th><th>last OK</th><th>last error</th><th>message</th></tr>{rows}</table>
 <p><small>POST /test-provider?token=…&label=… runs a live one-token completion.</small></p>
